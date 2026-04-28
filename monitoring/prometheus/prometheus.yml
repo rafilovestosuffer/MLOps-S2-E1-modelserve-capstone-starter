@@ -24,10 +24,3 @@ scrape_configs:
           service: 'modelserve-api'
           component: 'inference'
 
-  - job_name: 'mlflow'
-    metrics_path: '/'
-    static_configs:
-      - targets: ['mlflow:5000']
-        labels:
-          service: 'mlflow'
-          component: 'tracking'
