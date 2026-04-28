@@ -1,30 +1,30 @@
-# ============================================================================
-# ModelServe — Prometheus Metrics
-# ============================================================================
-# TODO: Define Prometheus metrics for the inference service.
-#
-# Required metrics (from exam document):
-#   - prediction_requests_total (Counter)
-#       Total number of prediction requests received
-#
-#   - prediction_duration_seconds (Histogram)
-#       Time taken to process each prediction (feature fetch + model inference)
-#
-#   - prediction_errors_total (Counter)
-#       Number of failed prediction requests
-#
-#   - model_version_info (Gauge with a "version" label)
-#       Currently served model version — set once on startup
-#
-#   - feast_online_store_hits_total (Counter)
-#       Successful feature lookups from Feast
-#
-#   - feast_online_store_misses_total (Counter)
-#       Failed or empty feature lookups from Feast
-#
-# Use the prometheus_client library:
-#   from prometheus_client import Counter, Histogram, Gauge
-#
-# To expose metrics at /metrics, use generate_latest() from prometheus_client
-# and return it as a Starlette Response with the correct content type.
-# ============================================================================
+from prometheus_client import Counter, Histogram, Gauge
+
+prediction_requests_total = Counter(
+    "prediction_requests_total",
+    "Total number of prediction requests",
+    ["status"],
+)
+
+prediction_duration_seconds = Histogram(
+    "prediction_duration_seconds",
+    "Time spent processing a prediction request",
+    buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5],
+)
+
+prediction_errors_total = Counter(
+    "prediction_errors_total",
+    "Total number of prediction errors",
+)
+
+model_version_info = Gauge(
+    "model_version_info",
+    "Currently loaded model version",
+    ["version"],
+)
+
+feast_lookup_total = Counter(
+    "feast_lookup_total",
+    "Total Feast feature lookups",
+    ["result"],
+)

@@ -1,17 +1,9 @@
-# ============================================================================
-# ModelServe — Feast Feature Store Configuration
-# ============================================================================
-# TODO: Configure Feast for your deployment topology.
-#
-# You need to define:
-#   - project: a name for your Feast project
-#   - provider: local (for file-based offline store) or aws (for S3)
-#   - registry: path to the Feast registry file
-#   - online_store: Redis connection details
-#   - offline_store: file or S3 configuration
-#
-# For local development, Redis runs in Docker Compose.
-# For production, adjust the connection string to match your topology.
-#
-# Refer to Feast documentation: https://docs.feast.dev/
-# ============================================================================
+project: modelserve
+registry: data/registry.db
+provider: local
+online_store:
+  type: redis
+  connection_string: "redis:6379"
+offline_store:
+  type: file
+entity_key_serialization_version: 2

@@ -1,0 +1,13 @@
+.git
+.github
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.*
+infrastructure/
+monitoring/
+docs/
+*.md
+.gitignore

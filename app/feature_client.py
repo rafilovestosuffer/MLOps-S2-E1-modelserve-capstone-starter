@@ -1,20 +1,44 @@
-# ============================================================================
-# ModelServe — Feast Feature Client
-# ============================================================================
-# TODO: Implement feature fetching from the Feast online store.
-#
-# This module should:
-#   - Initialize a Feast FeatureStore client pointing at your feast_repo
-#   - Provide a get_features(entity_id) method that:
-#     1. Calls store.get_online_features() with the entity key (cc_num)
-#     2. Converts the result to a dictionary or DataFrame
-#     3. Handles missing features gracefully (log warning, return defaults)
-#   - Track hit/miss counts for Prometheus metrics
-#
-# Key Feast APIs to use:
-#   - feast.FeatureStore(repo_path=...)
-#   - store.get_online_features(features=[...], entity_rows=[...])
-#
-# IMPORTANT: Use the Feast SDK — do NOT query Redis directly.
-# The TA will check this during the demo.
-# ============================================================================
+import os
+import logging
+from feast import FeatureStore
+
+logger = logging.getLogger(__name__)
+
+FEATURE_COLUMNS = [
+    "fraud_features:amt",
+    "fraud_features:lat",
+    "fraud_features:long",
+    "fraud_features:city_pop",
+    "fraud_features:unix_time",
+    "fraud_features:merch_lat",
+    "fraud_features:merch_long",
+]
+
+MODEL_FEATURE_NAMES = [f.split(":")[1] for f in FEATURE_COLUMNS]
+
+
+def get_feature_store():
+    repo_path = os.getenv("FEAST_REPO_PATH", "/app/feast_repo")
+    return FeatureStore(repo_path=repo_path)
+
+
+def get_online_features(store: FeatureStore, entity_id: int) -> dict:
+    """Fetch features for a single cc_num from the Redis online store."""
+    try:
+        entity_rows = [{"cc_num": entity_id}]
+        response = store.get_online_features(
+            features=FEATURE_COLUMNS,
+            entity_rows=entity_rows,
+        ).to_dict()
+
+        features = {}
+        for col in MODEL_FEATURE_NAMES:
+            # Feast 0.38 to_dict() returns plain feature names (no view prefix)
+            val = response.get(col, [None])[0]
+            features[col] = val
+
+        return features
+
+    except Exception as e:
+        logger.error(f"Feast lookup failed for cc_num={entity_id}: {e}")
+        raise
