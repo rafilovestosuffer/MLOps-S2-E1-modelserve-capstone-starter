@@ -26,6 +26,16 @@ A fraud detection inference service:
 │   ├── feature_store.yaml   # project=modelserve, redis:6379, local offline
 │   ├── feature_definitions.py  # cc_num entity, fraud_features view
 │   └── data/registry.db    # Feast registry (committed)
+├── monitoring/
+│   ├── prometheus/
+│   │   ├── prometheus.yml   # Scrape config: api:8000, mlflow:5000, self
+│   │   └── alerts.yml       # 4 alert rules: ServiceDown, HighLatency, HighErrorRate, LowFeastHitRate
+│   └── grafana/
+│       ├── provisioning/
+│       │   ├── datasources/prometheus.yml   # Auto-wires Prometheus datasource (uid: prometheus_ds)
+│       │   └── dashboards/dashboard.yml     # Tells Grafana where to load dashboard JSONs
+│       └── dashboards/
+│           └── modelserve-overview.json     # 8-panel dashboard (latency, throughput, errors, Feast)
 ├── training/
 │   ├── features.parquet     # 1,296,675 rows; cols: cc_num, amt, lat, long,
 │   │                        # city_pop, unix_time, merch_lat, merch_long,
@@ -33,8 +43,10 @@ A fraud detection inference service:
 │   ├── train_from_parquet.py  # Train RF from parquet, register in MLflow
 │   ├── train.py             # Original train script (needs fraudTrain.csv)
 │   └── sample_request.json  # {"entity_id": 0}
+├── scripts/
+│   └── materialize_features.py  # Feast incremental materialization helper
 ├── Dockerfile               # python:3.10-slim, HEALTHCHECK, uvicorn
-├── docker-compose.yml       # postgres, redis, mlflow, api
+├── docker-compose.yml       # postgres, redis, mlflow, api, prometheus, grafana
 ├── requirements.txt         # Pinned: fastapi==0.111.0, mlflow==2.13.0,
 │                            # feast[redis]==0.38.0, scikit-learn==1.4.2, etc.
 └── .dockerignore
@@ -68,7 +80,7 @@ docker compose ps mlflow
 docker run --rm \
   -v "${PWD}:/app" -w /app \
   -v mlops-s2-e1-modelserve-capstone-starter_mlflow_data:/mlflow \
-  --network mlops-s2-e1-modelserve-capstone-starter_default \
+  --network mlops-s2-e1-modelserve-capstone-starter_modelserve-net \
   -e MLFLOW_TRACKING_URI=http://modelserve-mlflow:5000 \
   python:3.10-slim \
   bash -c "pip install mlflow==2.13.0 scikit-learn==1.4.2 pyarrow pandas -q && GIT_PYTHON_REFRESH=quiet python training/train_from_parquet.py"
@@ -81,7 +93,7 @@ Expected output: `Model 'fraud_detector' version N promoted to Production`
 ```bash
 docker run --rm \
   -v "${PWD}:/app" -w /app \
-  --network mlops-s2-e1-modelserve-capstone-starter_default \
+  --network mlops-s2-e1-modelserve-capstone-starter_modelserve-net \
   -e FEAST_REDIS_HOST=modelserve-redis \
   python:3.10-slim \
   bash -c "pip install 'feast[redis]==0.38.0' pyarrow pandas -q && cd feast_repo && feast apply && feast materialize-incremental 2026-12-31T23:59:59"
@@ -96,7 +108,29 @@ docker compose logs api -f
 # Wait for: (healthy) in docker compose ps api
 ```
 
-### Step 6 — Verify everything
+### Step 6 — Start monitoring stack (Prometheus + Grafana)
+
+Prometheus and Grafana start automatically with `docker compose up -d`. Verify:
+
+```bash
+# All 6 services should be healthy
+docker compose ps
+
+# Prometheus is scraping the API
+curl http://localhost:9090/api/v1/targets | python3 -m json.tool | grep '"health"'
+# → all targets should show "health": "up"
+
+# Grafana is reachable
+curl -s http://localhost:3000/api/health
+# → {"commit":"...","database":"ok","version":"10.4.0"}
+```
+
+Open Grafana at **http://localhost:3000** — login `admin` / `admin`.
+Dashboard is pre-loaded: **ModelServe folder → ModelServe — Fraud Detection Overview**.
+
+---
+
+### Step 7 — Verify everything
 ```bash
 # Health
 curl http://localhost:8000/health
@@ -115,6 +149,18 @@ curl "http://localhost:8000/predict/0?explain=true"
 # Prometheus metrics
 curl http://localhost:8000/metrics | grep prediction
 ```
+
+---
+
+## Monitoring Endpoints
+
+| URL | What you see |
+|-----|-------------|
+| http://localhost:9090 | Prometheus UI |
+| http://localhost:9090/targets | Scrape target health |
+| http://localhost:9090/alerts | Alert rule status |
+| http://localhost:3000 | Grafana (admin/admin) |
+| http://localhost:8000/metrics | Raw Prometheus metrics from API |
 
 ---
 

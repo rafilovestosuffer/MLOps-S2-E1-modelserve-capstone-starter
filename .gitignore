@@ -1,10 +1,57 @@
-# TODO: Review and extend this .gitignore for your project.
-# Consider what files should never be committed:
-#   - Environment files with secrets (.env)
-#   - Python bytecode and virtual environments
-#   - Model artifacts (stored in MLflow, not git)
-#   - Large data files (downloaded from Kaggle, not git)
-#   - Pulumi stack configuration with secrets
-#   - IDE and OS files
-#   - Docker build artifacts
-#   - Test coverage reports
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Secrets and environment files
+.env
+*.env
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# MLflow local runs (model artifacts live in Docker volume, not git)
+mlruns/
+mlartifacts/
+
+# Large data files (features.parquet is committed intentionally — it is small enough and required for bootstrap)
+training/data/
+*.csv
+
+# Pulumi state
+.pulumi/
+Pulumi.*.yaml
+!Pulumi.yaml
+
+# Docker
+*.tar
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
