@@ -1,39 +1,95 @@
-# ============================================================================
-# ModelServe — GitHub Actions CI/CD Pipeline
-# ============================================================================
-# TODO: Implement the full CI/CD pipeline.
-#
-# Required jobs:
-#
-#   1. test
-#      - Triggers on: every push and pull request
-#      - Steps: checkout, setup Python, install dependencies, run pytest
-#      - Must pass before any other job runs
-#
-#   2. build-and-push
-#      - Triggers on: push to main only (after test passes)
-#      - Steps: checkout, configure AWS credentials, login to ECR,
-#               build Docker image, tag with :latest and :$GITHUB_SHA,
-#               push to ECR
-#      - Needs: test
-#
-#   3. deploy
-#      - Triggers on: push to main only (after build-and-push passes)
-#      - Steps: connect to deployment target, pull new images,
-#               restart services, verify health endpoint returns 200
-#      - Needs: build-and-push
-#
-# Optional additional jobs:
-#   - infrastructure: run pulumi up before build-and-push
-#   - lint: run flake8 or ruff
-#   - security-scan: run Trivy on built images (bonus marks)
-#
-# Required GitHub Secrets (document these in your README):
-#   - AWS_ACCESS_KEY_ID
-#   - AWS_SECRET_ACCESS_KEY
-#   - PULUMI_ACCESS_TOKEN
-#   - SSH_PRIVATE_KEY (if deploying to EC2 via SSH)
-#   - SSH_PUBLIC_KEY (if Pulumi creates key pairs)
-#
-# Refer to the Pulumi/CI/CD lab from Episodes 2-3 for patterns.
-# ============================================================================
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Job 1: Run tests ────────────────────────────────────────────────────────
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install fastapi==0.111.0 uvicorn==0.29.0 mlflow==2.13.0 scikit-learn==1.4.2 "feast[redis]==0.38.0" prometheus-client==0.20.0 numpy==1.26.4 pandas==2.2.2 pydantic==2.7.0 httpx pytest
+
+      - name: Run pytest
+        run: pytest app/tests/ -v
+
+  # ── Job 2: Build and push Docker image to ECR ──────────────────────────────
+  build-and-push:
+    name: Build & Push to ECR
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-southeast-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: modelserve-api
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+  # ── Job 3: Deploy and verify health ────────────────────────────────────────
+  deploy:
+    name: Deploy & Verify
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd ~/modelserve
+            git pull origin main
+            docker compose pull api
+            docker compose up api -d --force-recreate
+            sleep 15
+
+      - name: Verify health endpoint
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://${{ secrets.DEPLOY_HOST }}:8000/health)
+          if [ "$STATUS" != "200" ]; then
+            echo "Health check failed with status $STATUS"
+            exit 1
+          fi
+          echo "Health check passed (HTTP $STATUS)"

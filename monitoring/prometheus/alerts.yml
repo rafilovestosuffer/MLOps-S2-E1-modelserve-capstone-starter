@@ -1,30 +1,69 @@
-# ============================================================================
-# ModelServe — Prometheus Alert Rules
-# ============================================================================
-# TODO: Define at least THREE alert rules.
-#
-# Required alerts:
-#   1. High prediction latency
-#      - Trigger when p95 latency exceeds your chosen threshold for 5 minutes
-#      - Hint: histogram_quantile(0.95, rate(prediction_duration_seconds_bucket[5m]))
-#      - Severity: warning
-#
-#   2. Elevated error rate
-#      - Trigger when error rate exceeds 5% for 2 minutes
-#      - Hint: rate(prediction_errors_total[2m]) / rate(prediction_requests_total[2m])
-#      - Severity: warning
-#
-#   3. Service down
-#      - Trigger when the FastAPI service is unreachable for 1 minute
-#      - Hint: up{job="your-job-name"} == 0
-#      - Severity: critical
-#
-# Each alert needs:
-#   - alert: <name>
-#   - expr: <PromQL expression>
-#   - for: <duration>
-#   - labels: severity
-#   - annotations: summary and description
-#
-# The TA will verify these alerts exist and may trigger them during the demo.
-# ============================================================================
+groups:
+  - name: modelserve_alerts
+    interval: 15s
+    rules:
+
+      # Alert 1: API Service Down
+      # Fires if FastAPI scrape target has been unreachable for 1 minute.
+      # "up" is a Prometheus built-in: 1 = scrape OK, 0 = unreachable.
+      - alert: APIServiceDown
+        expr: up{job="modelserve-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "FastAPI inference service is DOWN"
+          description: "FastAPI service has been unreachable for more than 1 minute. Predictions are not being served."
+
+      # Alert 2: High Prediction Latency
+      # p95 > 500ms for 3 consecutive minutes.
+      # Expected p95 in healthy state is < 50ms; 500ms = 10x degradation.
+      - alert: HighPredictionLatency
+        expr: |
+          histogram_quantile(
+            0.95,
+            rate(prediction_duration_seconds_bucket[5m])
+          ) > 0.5
+        for: 3m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "p95 prediction latency exceeds 500ms"
+          description: "p95 latency is {{ $value | humanizeDuration }}. Possible causes: Redis slowness, model loading issue, or CPU starvation."
+
+      # Alert 3: High Error Rate
+      # More than 5% of requests are errors over a 5-minute window, sustained for 2 minutes.
+      # clamp_min avoids division-by-zero when no traffic exists.
+      - alert: HighErrorRate
+        expr: |
+          (
+            rate(prediction_errors_total[5m])
+            /
+            clamp_min(rate(prediction_requests_total[5m]), 0.0001)
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "Prediction error rate exceeds 5%"
+          description: "Error rate is {{ $value | humanizePercentage }}. Check application logs immediately."
+
+      # Alert 4: Low Feast Feature Store Hit Rate
+      # Hit rate below 70% for 5 minutes means features may need re-materialization.
+      - alert: LowFeastHitRate
+        expr: |
+          (
+            rate(feast_lookup_total{result="hit"}[5m])
+            /
+            clamp_min(rate(feast_lookup_total[5m]), 0.0001)
+          ) < 0.7
+        for: 5m
+        labels:
+          severity: warning
+          component: feast
+        annotations:
+          summary: "Feast feature store hit rate below 70%"
+          description: "Hit rate is {{ $value | humanizePercentage }}. Features may need re-materialization."

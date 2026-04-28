@@ -1,12 +1,26 @@
 # ============================================================================
 # ModelServe — Docker Compose (Local Development)
+# Services: postgres, redis, mlflow, api, prometheus, grafana
 # ============================================================================
+
+networks:
+  modelserve-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  mlflow_data:
+  prometheus_data:
+  grafana_data:
 
 services:
 
   postgres:
     image: postgres:15-alpine
     container_name: modelserve-postgres
+    restart: unless-stopped
+    networks:
+      - modelserve-net
     environment:
       POSTGRES_USER: mlflow
       POSTGRES_PASSWORD: mlflow
@@ -24,6 +38,9 @@ services:
   redis:
     image: redis:7-alpine
     container_name: modelserve-redis
+    restart: unless-stopped
+    networks:
+      - modelserve-net
     ports:
       - "6379:6379"
     healthcheck:
@@ -35,6 +52,9 @@ services:
   mlflow:
     image: ghcr.io/mlflow/mlflow:v2.14.0
     container_name: modelserve-mlflow
+    restart: unless-stopped
+    networks:
+      - modelserve-net
     environment:
       - MLFLOW_ARTIFACT_ROOT=/mlflow/artifacts
     volumes:
@@ -59,6 +79,9 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: modelserve-api
+    restart: unless-stopped
+    networks:
+      - modelserve-net
     depends_on:
       mlflow:
         condition: service_healthy
@@ -82,6 +105,55 @@ services:
       retries: 5
       start_period: 20s
 
-volumes:
-  postgres_data:
-  mlflow_data:
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: modelserve-prometheus
+    restart: unless-stopped
+    networks:
+      - modelserve-net
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: modelserve-grafana
+    restart: unless-stopped
+    networks:
+      - modelserve-net
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --spider http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
