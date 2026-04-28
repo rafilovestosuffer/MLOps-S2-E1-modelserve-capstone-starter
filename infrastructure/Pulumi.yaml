@@ -1,13 +1,5 @@
-# ============================================================================
-# ModelServe — Pulumi Project Configuration
-# ============================================================================
-# TODO: Configure this file for your project.
-#
-# Required fields:
-#   - name: your project name
-#   - runtime: python
-#   - description: brief description
-#   - config: default AWS region
-#
-# Refer to the Pulumi/CI/CD lab from Episodes 2-3.
-# ============================================================================
+name: modelserve
+runtime: python
+description: ModelServe AWS Infrastructure — single EC2 node deployment
+config:
+  aws:region: ap-southeast-1

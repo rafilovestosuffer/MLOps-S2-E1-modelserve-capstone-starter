@@ -1,5 +1,6 @@
 name: CI/CD Pipeline
 
+# ── Triggers ──────────────────────────────────────────────────────────────────
 on:
   push:
     branches: [main]
@@ -7,7 +8,12 @@ on:
     branches: [main]
 
 jobs:
-  # ── Job 1: Run tests ────────────────────────────────────────────────────────
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Job 1: test
+  # Runs on every push and every pull request.
+  # Validates that the FastAPI service passes all unit tests.
+  # ══════════════════════════════════════════════════════════════════════════
   test:
     name: Run Tests
     runs-on: ubuntu-latest
@@ -22,17 +28,80 @@ jobs:
           python-version: "3.10"
 
       - name: Install dependencies
-        run: pip install fastapi==0.111.0 uvicorn==0.29.0 mlflow==2.13.0 scikit-learn==1.4.2 "feast[redis]==0.38.0" prometheus-client==0.20.0 numpy==1.26.4 pandas==2.2.2 pydantic==2.7.0 httpx pytest
+        run: |
+          pip install \
+            fastapi==0.111.0 \
+            uvicorn==0.29.0 \
+            mlflow==2.13.0 \
+            scikit-learn==1.4.2 \
+            "feast[redis]==0.38.0" \
+            prometheus-client==0.20.0 \
+            numpy==1.26.4 \
+            pandas==2.2.2 \
+            pydantic==2.7.0 \
+            httpx \
+            pytest
 
       - name: Run pytest
         run: pytest app/tests/ -v
 
-  # ── Job 2: Build and push Docker image to ECR ──────────────────────────────
-  build-and-push:
-    name: Build & Push to ECR
+  # ══════════════════════════════════════════════════════════════════════════
+  # Job 2: infrastructure
+  # Runs on pushes to main only (after test passes).
+  # Provisions / updates AWS resources via Pulumi (incremental update).
+  # CI/CD Strategy: INCREMENTAL UPDATE — we do NOT destroy-and-recreate on
+  # every push. The EC2 instance is persistent; only the container restarts.
+  # This preserves MLflow model state and keeps deploy time under 2 minutes.
+  # ══════════════════════════════════════════════════════════════════════════
+  infrastructure:
+    name: Pulumi Infrastructure
     runs-on: ubuntu-latest
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Pulumi dependencies
+        run: pip install -r infrastructure/requirements.txt
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-southeast-1
+
+      - name: Pulumi up (incremental update)
+        uses: pulumi/actions@v5
+        with:
+          command: up
+          stack-name: prod
+          work-dir: infrastructure
+          upsert: true
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Job 3: build-and-push
+  # Runs on pushes to main, after infrastructure is confirmed healthy.
+  # Builds the Docker image and pushes it to ECR.
+  # ══════════════════════════════════════════════════════════════════════════
+  build-and-push:
+    name: Build & Push to ECR
+    runs-on: ubuntu-latest
+    needs: infrastructure
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    outputs:
+      image: ${{ steps.build.outputs.image }}
 
     steps:
       - name: Checkout code
@@ -50,18 +119,25 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build, tag, and push image to ECR
+        id: build
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: modelserve-api
           IMAGE_TAG: ${{ github.sha }}
         run: |
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker tag  $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+                      $ECR_REGISTRY/$ECR_REPOSITORY:latest
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-  # ── Job 3: Deploy and verify health ────────────────────────────────────────
+  # ══════════════════════════════════════════════════════════════════════════
+  # Job 4: deploy
+  # Runs after build-and-push succeeds.
+  # SSHes into EC2, pulls the new image, restarts only the API container.
+  # Verifies /health returns HTTP 200 before marking the job as success.
+  # ══════════════════════════════════════════════════════════════════════════
   deploy:
     name: Deploy & Verify
     runs-on: ubuntu-latest
@@ -72,6 +148,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-southeast-1
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
         with:
@@ -80,16 +163,36 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd ~/modelserve
+
+            # Pull latest code
             git pull origin main
+
+            # Login to ECR and pull new image
+            AWS_REGION=ap-southeast-1
+            ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+            aws ecr get-login-password --region $AWS_REGION \
+              | docker login --username AWS --password-stdin \
+                $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+
             docker compose pull api
+
+            # Restart only the API container (incremental update)
             docker compose up api -d --force-recreate
-            sleep 15
+
+            # Wait for API to come back up
+            sleep 20
 
       - name: Verify health endpoint
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://${{ secrets.DEPLOY_HOST }}:8000/health)
-          if [ "$STATUS" != "200" ]; then
-            echo "Health check failed with status $STATUS"
-            exit 1
-          fi
-          echo "Health check passed (HTTP $STATUS)"
+          for i in $(seq 1 12); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              http://${{ secrets.DEPLOY_HOST }}:8000/health || echo "000")
+            echo "Attempt $i — HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check passed!"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Health check failed after 12 attempts"
+          exit 1
