@@ -265,11 +265,22 @@ def make_user_data(s3_bucket_name: str) -> str:
         done
 
         # ── Register fraud detection model in MLflow ───────────────────────
-        docker compose run --rm \\
-            -e MLFLOW_TRACKING_URI=http://mlflow:5000 \\
+        docker compose run --rm \
+            -e MLFLOW_TRACKING_URI=http://mlflow:5000 \
             api python training/train_from_parquet.py
 
-        # ── Start full stack ───────────────────────────────────────────────
+        # ── Apply Feast feature schema to registry ─────────────────────────
+        docker compose run --rm \
+            -e FEAST_REPO_PATH=/app/feast_repo \
+            api feast -c /app/feast_repo apply
+
+        # ── Materialize features into Redis online store ───────────────────
+        # This populates Redis so POST /predict works immediately
+        docker compose run --rm \
+            -e FEAST_REPO_PATH=/app/feast_repo \
+            api python scripts/materialize_features.py
+
+        # ── Start full stack (all services including API) ──────────────────
         docker compose up -d
 
         echo "ModelServe bootstrap complete!"
