@@ -1,0 +1,41 @@
+flowchart TB
+    subgraph GitHub["GitHub Actions CI/CD"]
+        T[test\npytest] --> BP[build-and-push\nDocker → ECR]
+        BP --> D[deploy\nSSH → EC2]
+        INF[infrastructure\npulumi up]
+    end
+
+    subgraph AWS["AWS ap-southeast-1"]
+        ECR["ECR\nmodelserve-api\n(Docker registry)"]
+        S3["S3\nmodelserve-artifacts-*\n(MLflow artifacts)"]
+
+        subgraph VPC["VPC 10.0.0.0/16 — Public Subnet 10.0.1.0/24"]
+            EIP["Elastic IP\n(stable public address)"]
+
+            subgraph EC2["EC2 t3.small — Docker Compose"]
+                API["FastAPI :8000\nuvicorn\nnon-root user"]
+                MLFLOW["MLflow :5000\nTracking Server"]
+                REDIS["Redis :6379\nFeast online store"]
+                PG["PostgreSQL :5432\nMLflow backend"]
+                PROM["Prometheus :9090\nscrapes /metrics"]
+                GRAFANA["Grafana :3000\nprovisioned dashboards"]
+            end
+        end
+    end
+
+    subgraph Client["Client / TA Demo"]
+        CURL["curl / browser"]
+    end
+
+    CURL -->|POST /predict :8000| EIP
+    EIP --> API
+    API -->|Feast SDK| REDIS
+    API -->|MLflow SDK| MLFLOW
+    MLFLOW -->|backend store| PG
+    MLFLOW -->|artifacts| S3
+    PROM -->|scrape :8000/metrics| API
+    GRAFANA -->|query| PROM
+    D -->|SSH pull & restart| EC2
+    BP -->|docker push| ECR
+    EC2 -->|docker pull| ECR
+    INF -->|pulumi up| AWS

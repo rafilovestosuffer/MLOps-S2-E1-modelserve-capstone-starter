@@ -36,6 +36,50 @@ documentation that explains why it was built the way it is.
 
 ### 2.1 Production Topology (EC2)
 
+> Diagram source: [`docs/diagrams/architecture.mmd`](diagrams/architecture.mmd)
+> (GitHub renders Mermaid diagrams automatically)
+
+```mermaid
+flowchart TB
+    subgraph GitHub["GitHub Actions CI/CD"]
+        T[test\npytest] --> BP[build-and-push\nDocker → ECR]
+        BP --> D[deploy\nSSH → EC2]
+        INF[infrastructure\npulumi up]
+    end
+
+    subgraph AWS["AWS ap-southeast-1"]
+        ECR["ECR\nmodelserve-api\n(Docker registry)"]
+        S3["S3\nmodelserve-artifacts-*\n(MLflow artifacts)"]
+
+        subgraph VPC["VPC 10.0.0.0/16 — Public Subnet"]
+            EIP["Elastic IP\n(stable public address)"]
+            subgraph EC2["EC2 t3.small — Docker Compose"]
+                API["FastAPI :8000"]
+                MLFLOW["MLflow :5000"]
+                REDIS["Redis :6379"]
+                PG["PostgreSQL :5432"]
+                PROM["Prometheus :9090"]
+                GRAFANA["Grafana :3000"]
+            end
+        end
+    end
+
+    CURL["curl / browser\n(TA Demo)"] -->|POST /predict| EIP
+    EIP --> API
+    API -->|Feast SDK| REDIS
+    API -->|MLflow SDK| MLFLOW
+    MLFLOW --> PG
+    MLFLOW --> S3
+    PROM -->|scrape /metrics| API
+    GRAFANA --> PROM
+    D -->|SSH restart api| EC2
+    BP -->|docker push| ECR
+    EC2 -->|docker pull| ECR
+    INF -->|pulumi up| AWS
+```
+
+**ASCII fallback (same topology):**
+
 ```
   ┌─────────────────────────────────────────────────────────────────────────┐
   │  GitHub Actions (CI/CD)                                                 │

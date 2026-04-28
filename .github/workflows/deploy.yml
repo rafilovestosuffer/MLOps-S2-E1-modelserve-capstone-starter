@@ -12,7 +12,6 @@ jobs:
   # ══════════════════════════════════════════════════════════════════════════
   # Job 1: test
   # Runs on every push and every pull request.
-  # Validates that the FastAPI service passes all unit tests.
   # ══════════════════════════════════════════════════════════════════════════
   test:
     name: Run Tests
@@ -39,6 +38,7 @@ jobs:
             numpy==1.26.4 \
             pandas==2.2.2 \
             pydantic==2.7.0 \
+            psycopg2-binary==2.9.9 \
             httpx \
             pytest
 
@@ -46,18 +46,21 @@ jobs:
         run: pytest app/tests/ -v
 
   # ══════════════════════════════════════════════════════════════════════════
-  # Job 2: infrastructure
-  # Runs on pushes to main only (after test passes).
+  # Job 2: infrastructure (optional — runs only when PULUMI_ACCESS_TOKEN set)
   # Provisions / updates AWS resources via Pulumi (incremental update).
-  # CI/CD Strategy: INCREMENTAL UPDATE — we do NOT destroy-and-recreate on
-  # every push. The EC2 instance is persistent; only the container restarts.
-  # This preserves MLflow model state and keeps deploy time under 2 minutes.
+  # CI/CD Strategy: INCREMENTAL UPDATE — not destroy-and-recreate.
+  # NOTE: Infrastructure can also be deployed manually from Poridhi VM with:
+  #   cd infrastructure && pulumi up --yes
   # ══════════════════════════════════════════════════════════════════════════
   infrastructure:
     name: Pulumi Infrastructure
     runs-on: ubuntu-latest
     needs: test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: >
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push' &&
+      secrets.PULUMI_ACCESS_TOKEN != ''
+    continue-on-error: true
 
     steps:
       - name: Checkout code
@@ -91,13 +94,13 @@ jobs:
 
   # ══════════════════════════════════════════════════════════════════════════
   # Job 3: build-and-push
-  # Runs on pushes to main, after infrastructure is confirmed healthy.
+  # Runs on pushes to main, after test passes.
   # Builds the Docker image and pushes it to ECR.
   # ══════════════════════════════════════════════════════════════════════════
   build-and-push:
     name: Build & Push to ECR
     runs-on: ubuntu-latest
-    needs: infrastructure
+    needs: test
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     outputs:
@@ -136,7 +139,6 @@ jobs:
   # Job 4: deploy
   # Runs after build-and-push succeeds.
   # SSHes into EC2, pulls the new image, restarts only the API container.
-  # Verifies /health returns HTTP 200 before marking the job as success.
   # ══════════════════════════════════════════════════════════════════════════
   deploy:
     name: Deploy & Verify
