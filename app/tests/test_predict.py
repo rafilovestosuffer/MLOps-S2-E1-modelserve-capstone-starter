@@ -14,25 +14,23 @@ def _make_store_mock():
     return MagicMock()
 
 
-def _build_client():
-    """Build a TestClient with all heavy deps mocked out."""
+@pytest.fixture(scope="module")
+def client():
+    """Build a TestClient with all heavy deps mocked out for the entire module."""
     from fastapi.testclient import TestClient
+
+    features_mock = {
+        "amt": 100.0, "lat": 33.9, "long": -117.4,
+        "city_pop": 50000, "unix_time": 1325376018,
+        "merch_lat": 33.99, "merch_long": -117.1,
+    }
 
     with patch("app.main.load_production_model", return_value=(_make_model_mock(), "test-v1")), \
          patch("app.main.get_feature_store", return_value=_make_store_mock()), \
-         patch("app.main.get_online_features", return_value={
-             "amt": 100.0, "lat": 33.9, "long": -117.4,
-             "city_pop": 50000, "unix_time": 1325376018,
-             "merch_lat": 33.99, "merch_long": -117.1,
-         }):
+         patch("app.main.get_online_features", return_value=features_mock):
         from app.main import app
-        client = TestClient(app)
-        return client
-
-
-@pytest.fixture(scope="module")
-def client():
-    return _build_client()
+        with TestClient(app) as c:
+            yield c
 
 
 def test_health(client):
