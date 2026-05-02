@@ -81,7 +81,7 @@ aws.ec2.RouteTableAssociation(
 sg = aws.ec2.SecurityGroup(
     "modelserve-sg",
     vpc_id=vpc.id,
-    description="ModelServe security group — API, MLflow, Prometheus, Grafana, SSH",
+    description="ModelServe security group - API, MLflow, Prometheus, Grafana, SSH",
     ingress=[
         # SSH
         aws.ec2.SecurityGroupIngressArgs(
@@ -174,7 +174,7 @@ instance_profile = aws.iam.InstanceProfile(
     "modelserve-instance-profile",
     name="modelserve-instance-profile",
     role=iam_role.name,
-    tags={**TAGS, "Name": "modelserve-instance-profile"},
+    # tags omitted: sandbox IAM role lacks iam:TagInstanceProfile permission
 )
 
 # ══════════════════════════════════════════════════════════════════════════════
