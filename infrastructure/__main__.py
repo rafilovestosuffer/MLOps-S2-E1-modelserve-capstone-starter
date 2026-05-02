@@ -224,9 +224,15 @@ def make_user_data(s3_bucket_name: str) -> str:
         set -euxo pipefail
         exec > /var/log/userdata.log 2>&1
 
-        # ── System packages ────────────────────────────────────────────────
+        # ── System packages (Docker via official repo) ─────────────────────
         apt-get update -y
-        apt-get install -y docker.io docker-compose-plugin git curl awscli python3-pip
+        apt-get install -y ca-certificates curl gnupg git awscli python3-pip
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        chmod a+r /etc/apt/keyrings/docker.gpg
+        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "${{VERSION_CODENAME}}") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+        apt-get update -y
+        apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
         systemctl enable docker
         systemctl start docker

@@ -18,7 +18,7 @@ is instrumented with Prometheus metrics, and a Grafana dashboard provides real-t
 visibility into latency, error rate, and feature store health.
 
 The design philosophy is **simplicity over complexity**. All components run on a single
-AWS EC2 instance (`t3.small`) in the `ap-southeast-1` region, orchestrated by Docker
+AWS EC2 instance (`t3.medium`) in the `ap-southeast-1` region, orchestrated by Docker
 Compose. This topology eliminates cross-host networking, simplifies debugging, and
 makes the end-to-end system reproducible from a single `docker compose up` command.
 It is a deliberate trade-off: a single point of failure is acceptable for a capstone
@@ -53,7 +53,7 @@ flowchart TB
 
         subgraph VPC["VPC 10.0.0.0/16 — Public Subnet"]
             EIP["Elastic IP\n(stable public address)"]
-            subgraph EC2["EC2 t3.small — Docker Compose"]
+            subgraph EC2["EC2 t3.medium — Docker Compose"]
                 API["FastAPI :8000"]
                 MLFLOW["MLflow :5000"]
                 REDIS["Redis :6379"]
@@ -103,7 +103,7 @@ flowchart TB
   │                                                                         │
   │  VPC 10.0.0.0/16  │  Public Subnet 10.0.1.0/24                         │
   │  ┌──────────────────────────────────────────────────────────────────┐   │
-  │  │  EC2: t3.small  (Elastic IP — stable public address)            │   │
+  │  │  EC2: t3.medium  (Elastic IP — stable public address)            │   │
   │  │                                                                  │   │
   │  │  ┌─────────────────┐   :8000   TA / curl / browser              │   │
   │  │  │  FastAPI (api)  │◄──────────────────────────────────────     │   │
@@ -169,7 +169,7 @@ flowchart TB
 on the Poridhi VM, or a hybrid split. The Poridhi VM state is reset at the end of
 each session, making it unreliable as a long-term deployment target.
 
-**Decision:** Option A — all services run on a single AWS EC2 `t3.small` instance
+**Decision:** Option A — all services run on a single AWS EC2 `t3.medium` instance
 in `ap-southeast-1`, provisioned by Pulumi, with an Elastic IP for a stable address.
 
 **Rationale:** The Poridhi VM does not persist between sessions, so any deployment
@@ -179,8 +179,8 @@ topology also eliminates cross-host networking complexity, making the system eas
 to debug under demo pressure.
 
 **Trade-offs:** Single point of failure — if the EC2 instance crashes, everything goes
-down. No horizontal scaling. Resource contention between services on a `t3.small`
-(2 vCPU, 2 GB RAM) could cause memory pressure under heavy load. In a real production
+down. No horizontal scaling. Resource contention between services on a `t3.medium`
+(2 vCPU, 4 GB RAM) could cause memory pressure under sustained load. In a real production
 deployment, stateful services (PostgreSQL, Redis, MLflow) would be separated onto
 managed services (RDS, ElastiCache, a dedicated MLflow server).
 
