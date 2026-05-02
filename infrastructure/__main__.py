@@ -297,7 +297,7 @@ user_data = s3_bucket.id.apply(make_user_data)
 ec2_instance = aws.ec2.Instance(
     "modelserve-ec2",
     ami=ubuntu_ami.id,
-    instance_type="t3.small",
+    instance_type="t3.medium",
     subnet_id=subnet.id,
     vpc_security_group_ids=[sg.id],
     key_name=key_pair.key_name,
