@@ -1,9 +1,10 @@
 import os
 import mlflow
 import mlflow.sklearn
-import logging
 
-logger = logging.getLogger(__name__)
+from app.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def load_production_model():
@@ -15,7 +16,8 @@ def load_production_model():
 
     model_name = os.getenv("MLFLOW_MODEL_NAME", "fraud_detector")
 
-    logger.info(f"Loading model '{model_name}' (Production) from {mlflow_uri}")
+    logger.info(f"Loading model from MLflow Registry: {model_name}@Production")
+    logger.info(f"MLflow tracking URI: {mlflow_uri}")
 
     try:
         model_uri = f"models:/{model_name}/Production"
@@ -24,10 +26,23 @@ def load_production_model():
         client = mlflow.MlflowClient()
         versions = client.get_latest_versions(model_name, stages=["Production"])
         version = versions[0].version if versions else "unknown"
+        run_id = versions[0].run_id if versions else "unknown"
 
-        logger.info(f"Model loaded successfully — version {version}")
+        logger.info(f"Model loaded successfully — version: {version}, run_id: {run_id}")
+        logger.info(f"Model type: {type(model).__name__}")
+
+        # Check if model version has metrics
+        if versions:
+            try:
+                run = client.get_run(run_id)
+                metrics = run.data.metrics
+                if not metrics:
+                    logger.warning(f"Model version {version} in registry has no metrics logged")
+            except Exception as e:
+                logger.debug(f"Could not retrieve metrics for model version {version}: {e}")
+
         return model, version
 
     except Exception as e:
-        logger.error(f"Failed to load model: {e}")
+        logger.exception(f"Failed to load model from MLflow Registry: {e}")
         raise
