@@ -7,7 +7,6 @@ Resources: VPC, Subnet, IGW, Route Table, Security Group, Key Pair,
 """
 
 import os
-import textwrap
 import pulumi
 import pulumi_aws as aws
 
@@ -223,31 +222,31 @@ ecr_repo = aws.ecr.Repository(
 # ══════════════════════════════════════════════════════════════════════════════
 
 def make_user_data(s3_bucket_name: str) -> str:
-    return textwrap.dedent(f"""\
-        #!/bin/bash
-        set -euxo pipefail
-        exec > /var/log/userdata.log 2>&1
+    # Script must start at column 0 — shebang must be the very first character
+    return f"""#!/bin/bash
+set -euxo pipefail
+exec > /var/log/userdata.log 2>&1
 
-        # ── System packages (Docker via official repo) ─────────────────────
-        apt-get update -y
-        apt-get install -y ca-certificates curl gnupg git awscli python3-pip
-        install -m 0755 -d /etc/apt/keyrings
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-        chmod a+r /etc/apt/keyrings/docker.gpg
-        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "${{VERSION_CODENAME}}") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-        apt-get update -y
-        apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+# System packages (Docker via official repo)
+apt-get update -y
+apt-get install -y ca-certificates curl gnupg git awscli python3-pip
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+chmod a+r /etc/apt/keyrings/docker.gpg
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "${{VERSION_CODENAME}}") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+apt-get update -y
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-        systemctl enable docker
-        systemctl start docker
-        usermod -aG docker ubuntu
+systemctl enable docker
+systemctl start docker
+usermod -aG docker ubuntu
 
-        # ── Clone repository ───────────────────────────────────────────────
-        git clone {GITHUB_REPO} /home/ubuntu/modelserve
-        chown -R ubuntu:ubuntu /home/ubuntu/modelserve
+# Clone repository
+git clone {GITHUB_REPO} /home/ubuntu/modelserve
+chown -R ubuntu:ubuntu /home/ubuntu/modelserve
 
-        # ── Write .env for production ──────────────────────────────────────
-        cat > /home/ubuntu/modelserve/.env << 'ENVEOF'
+# Write .env for production
+cat > /home/ubuntu/modelserve/.env << 'ENVEOF'
 POSTGRES_USER=mlflow
 POSTGRES_PASSWORD=mlflow
 POSTGRES_DB=mlflow
@@ -260,41 +259,34 @@ GF_SECURITY_ADMIN_USER=admin
 GF_SECURITY_ADMIN_PASSWORD=admin
 ENVEOF
 
-        # ── Start supporting services (not API yet — no model registered) ──
-        cd /home/ubuntu/modelserve
-        docker compose up -d postgres redis mlflow
+# Start supporting services (not API yet — no model registered)
+cd /home/ubuntu/modelserve
+docker compose up -d postgres redis mlflow
 
-        # ── Wait for MLflow to be healthy ──────────────────────────────────
-        echo "Waiting for MLflow..."
-        for i in $(seq 1 60); do
-            if curl -sf http://localhost:5000/health > /dev/null 2>&1; then
-                echo "MLflow ready after ${{i}}x5s"
-                break
-            fi
-            sleep 5
-        done
+# Wait for MLflow to be healthy
+echo "Waiting for MLflow..."
+for i in $(seq 1 60); do
+    if curl -sf http://localhost:5000/health > /dev/null 2>&1; then
+        echo "MLflow ready after ${{i}}x5s"
+        break
+    fi
+    sleep 5
+done
 
-        # ── Register fraud detection model in MLflow ───────────────────────
-        docker compose run --rm \
-            -e MLFLOW_TRACKING_URI=http://mlflow:5000 \
-            api python training/train_from_parquet.py
+# Register fraud detection model in MLflow
+docker compose run --rm -e MLFLOW_TRACKING_URI=http://mlflow:5000 api python training/train_from_parquet.py
 
-        # ── Apply Feast feature schema to registry ─────────────────────────
-        docker compose run --rm \
-            -e FEAST_REPO_PATH=/app/feast_repo \
-            api feast -c /app/feast_repo apply
+# Apply Feast feature schema to registry
+docker compose run --rm -e FEAST_REPO_PATH=/app/feast_repo api feast -c /app/feast_repo apply
 
-        # ── Materialize features into Redis online store ───────────────────
-        # This populates Redis so POST /predict works immediately
-        docker compose run --rm \
-            -e FEAST_REPO_PATH=/app/feast_repo \
-            api python scripts/materialize_features.py
+# Materialize features into Redis online store
+docker compose run --rm -e FEAST_REPO_PATH=/app/feast_repo api python scripts/materialize_features.py --full
 
-        # ── Start full stack (all services including API) ──────────────────
-        docker compose up -d
+# Start full stack (all services including API)
+docker compose up -d
 
-        echo "ModelServe bootstrap complete!"
-        """)
+echo "ModelServe bootstrap complete!"
+"""
 
 
 # Use pulumi.Output.apply to build user-data after s3_bucket name is resolved
