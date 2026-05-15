@@ -49,10 +49,7 @@ def configure_logging():
 
 
 def get_logger(name: str) -> logging.Logger:
-    logger = logging.getLogger(name)
-    if not logging.getLogger().handlers:
-        configure_logging()
-    return logger
+    return logging.getLogger(name)
 
 
 def set_request_id(request_id: str):
