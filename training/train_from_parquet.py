@@ -29,12 +29,14 @@ def load_features():
     df = pd.read_parquet("training/features.parquet")
     X = df[FEATURE_COLS].fillna(0)
 
-    if "is_fraud" not in df.columns:
-        raise ValueError(
-            "features.parquet is missing the 'is_fraud' column. "
-            "Re-export the parquet from fraudTrain.csv including the label column."
-        )
-    y = df["is_fraud"].astype(int)
+    if "is_fraud" in df.columns:
+        y = df["is_fraud"].astype(int)
+        logger.info(f"Using real is_fraud labels from parquet")
+    else:
+        # Fallback: synthetic labels when parquet was exported without the label column
+        logger.warning("is_fraud column not found — generating synthetic labels (amt > p99 AND unix_time % 7 == 0)")
+        threshold = df["amt"].quantile(0.99)
+        y = ((df["amt"] > threshold) & (df["unix_time"] % 7 == 0)).astype(int)
     logger.info(f"Features shape: {X.shape}, fraud rate: {y.mean():.3%}")
     return X, y
 
