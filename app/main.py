@@ -92,16 +92,9 @@ def predict(request: PredictRequest):
     try:
         try:
             features = get_online_features(FEATURE_STORE, request.entity_id)
-            feast_lookup_total.labels(result="hit").inc()
             logger.debug(f"Feature values fetched from Feast: {features}")
-
         except Exception as e:
-            # Check if this is a "not found" error (cache miss)
-            if "not found" in str(e).lower() or "missing" in str(e).lower():
-                logger.warning(f"Feature cache MISS for entity_id={request.entity_id}")
-            else:
-                logger.error(f"Feast lookup failed for entity_id={request.entity_id}: {e}")
-
+            logger.error(f"Feast lookup failed for entity_id={request.entity_id}: {e}")
             feast_lookup_total.labels(result="miss").inc()
             prediction_errors_total.inc()
             prediction_requests_total.labels(status="error").inc()
@@ -110,7 +103,7 @@ def predict(request: PredictRequest):
                 detail={"error": "Feature lookup failed", "message": str(e)},
             )
 
-        # Reject if any features are missing — don't silently predict on zeros
+        # Reject if any features are missing — null return means entity not in Redis
         null_fields = [col for col in MODEL_FEATURE_NAMES if features.get(col) is None]
         if null_fields:
             feast_lookup_total.labels(result="miss").inc()
@@ -125,6 +118,7 @@ def predict(request: PredictRequest):
                 },
             )
 
+        feast_lookup_total.labels(result="hit").inc()
         feature_vector = [features.get(col) for col in MODEL_FEATURE_NAMES]
         X = np.array(feature_vector).reshape(1, -1)
         prediction = int(MODEL.predict(X)[0])
