@@ -69,3 +69,59 @@ def test_metrics_endpoint(client):
     resp = client.get("/metrics")
     assert resp.status_code == 200
     assert b"prediction_requests_total" in resp.content
+
+
+def test_predict_post_cache_miss():
+    """Entity not in Redis → all features are None → must return 422, not a garbage prediction."""
+    from fastapi.testclient import TestClient
+
+    null_features = {
+        "amt": None, "lat": None, "long": None,
+        "city_pop": None, "unix_time": None,
+        "merch_lat": None, "merch_long": None,
+    }
+
+    with patch("app.main.load_production_model", return_value=(_make_model_mock(), "test-v1")), \
+         patch("app.main.get_feature_store", return_value=_make_store_mock()), \
+         patch("app.main.get_online_features", return_value=null_features):
+        from app.main import app
+        with TestClient(app) as c:
+            resp = c.post("/predict", json={"entity_id": 9999})
+            assert resp.status_code == 422
+            body = resp.json()
+            assert body["detail"]["error"] == "Entity not found in feature store"
+            assert "missing_fields" in body["detail"]
+
+
+def test_predict_get_cache_miss():
+    """GET endpoint — entity not in Redis → 422, not a garbage prediction."""
+    from fastapi.testclient import TestClient
+
+    null_features = {
+        "amt": None, "lat": None, "long": None,
+        "city_pop": None, "unix_time": None,
+        "merch_lat": None, "merch_long": None,
+    }
+
+    with patch("app.main.load_production_model", return_value=(_make_model_mock(), "test-v1")), \
+         patch("app.main.get_feature_store", return_value=_make_store_mock()), \
+         patch("app.main.get_online_features", return_value=null_features):
+        from app.main import app
+        with TestClient(app) as c:
+            resp = c.get("/predict/9999")
+            assert resp.status_code == 422
+            body = resp.json()
+            assert body["detail"]["error"] == "Entity not found in feature store"
+
+
+def test_predict_feast_connection_error():
+    """Feast raises an exception (e.g. Redis down) → 503, not 500."""
+    from fastapi.testclient import TestClient
+
+    with patch("app.main.load_production_model", return_value=(_make_model_mock(), "test-v1")), \
+         patch("app.main.get_feature_store", return_value=_make_store_mock()), \
+         patch("app.main.get_online_features", side_effect=ConnectionError("Redis connection refused")):
+        from app.main import app
+        with TestClient(app) as c:
+            resp = c.post("/predict", json={"entity_id": 1})
+            assert resp.status_code == 503
