@@ -12,7 +12,7 @@ flowchart TB
         subgraph VPC["VPC 10.0.0.0/16 — Public Subnet 10.0.1.0/24"]
             EIP["Elastic IP\n(stable public address)"]
 
-            subgraph EC2["EC2 t3.small — Docker Compose"]
+            subgraph EC2["EC2 t3.medium — Docker Compose"]
                 API["FastAPI :8000\nuvicorn\nnon-root user"]
                 MLFLOW["MLflow :5000\nTracking Server"]
                 REDIS["Redis :6379\nFeast online store"]
