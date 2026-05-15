@@ -94,6 +94,7 @@ services:
       - MLFLOW_MODEL_NAME=fraud_detector
       - FEAST_REPO_PATH=/app/feast_repo
       - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - ./training:/app/training
       - ./feast_repo:/app/feast_repo
