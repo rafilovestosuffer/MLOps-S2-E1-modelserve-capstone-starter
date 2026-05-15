@@ -110,12 +110,22 @@ def predict(request: PredictRequest):
                 detail={"error": "Feature lookup failed", "message": str(e)},
             )
 
-        # Check for null features
+        # Reject if any features are missing — don't silently predict on zeros
         null_fields = [col for col in MODEL_FEATURE_NAMES if features.get(col) is None]
         if null_fields:
-            logger.warning(f"Null features detected for entity_id={request.entity_id}, fields: {null_fields}")
+            feast_lookup_total.labels(result="miss").inc()
+            prediction_errors_total.inc()
+            prediction_requests_total.labels(status="error").inc()
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "Entity not found in feature store",
+                    "entity_id": request.entity_id,
+                    "missing_fields": null_fields,
+                },
+            )
 
-        feature_vector = [features.get(col, 0.0) for col in MODEL_FEATURE_NAMES]
+        feature_vector = [features.get(col) for col in MODEL_FEATURE_NAMES]
         X = np.array(feature_vector).reshape(1, -1)
         prediction = int(MODEL.predict(X)[0])
         probability = float(MODEL.predict_proba(X)[0][1])
@@ -152,42 +162,72 @@ def predict(request: PredictRequest):
 @app.get("/predict/{entity_id}")
 def predict_explain(entity_id: int, explain: bool = False):
     """GET version — returns prediction + optional feature values when explain=true."""
+    start = time.time()
     logger.info(f"Prediction request received — entity_id={entity_id}")
 
     try:
-        features = get_online_features(FEATURE_STORE, entity_id)
-        logger.debug(f"Feature values fetched from Feast: {features}")
+        try:
+            features = get_online_features(FEATURE_STORE, entity_id)
+            logger.debug(f"Feature values fetched from Feast: {features}")
+        except Exception as e:
+            logger.error(f"Feast lookup failed for entity_id={entity_id}: {e}")
+            feast_lookup_total.labels(result="miss").inc()
+            prediction_errors_total.inc()
+            prediction_requests_total.labels(status="error").inc()
+            raise HTTPException(status_code=503, detail={"error": "Feature lookup failed", "message": str(e)})
 
+        # Reject if any features are missing — don't silently predict on zeros
+        null_fields = [col for col in MODEL_FEATURE_NAMES if features.get(col) is None]
+        if null_fields:
+            feast_lookup_total.labels(result="miss").inc()
+            prediction_errors_total.inc()
+            prediction_requests_total.labels(status="error").inc()
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "Entity not found in feature store",
+                    "entity_id": entity_id,
+                    "missing_fields": null_fields,
+                },
+            )
+
+        feast_lookup_total.labels(result="hit").inc()
+        feature_vector = [features.get(col) for col in MODEL_FEATURE_NAMES]
+        X = np.array(feature_vector).reshape(1, -1)
+        prediction = int(MODEL.predict(X)[0])
+        probability = float(MODEL.predict_proba(X)[0][1])
+
+        duration = time.time() - start
+        prediction_duration_seconds.observe(duration)
+        prediction_requests_total.labels(status="success").inc()
+
+        logger.info(
+            f"Prediction complete — result={prediction}, probability={probability:.4f}, "
+            f"version={MODEL_VERSION}, latency={int(duration * 1000)}ms"
+        )
+
+        response = {
+            "prediction": prediction,
+            "probability": probability,
+            "model_version": MODEL_VERSION,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if explain:
+            response["features_used"] = features
+            logger.info(f"Features used for explanation — entity_id={entity_id}")
+
+        return response
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Feast lookup failed for entity_id={entity_id}: {e}")
-        raise HTTPException(status_code=503, detail=str(e))
-
-    # Check for null features
-    null_fields = [col for col in MODEL_FEATURE_NAMES if features.get(col) is None]
-    if null_fields:
-        logger.warning(f"Null features detected for entity_id={entity_id}, fields: {null_fields}")
-
-    feature_vector = [features.get(col, 0.0) for col in MODEL_FEATURE_NAMES]
-    X = np.array(feature_vector).reshape(1, -1)
-    prediction = int(MODEL.predict(X)[0])
-    probability = float(MODEL.predict_proba(X)[0][1])
-
-    response = {
-        "prediction": prediction,
-        "probability": probability,
-        "model_version": MODEL_VERSION,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    if explain:
-        response["features_used"] = features
-        logger.info(f"Features used for explanation — entity_id={entity_id}")
-
-    logger.info(
-        f"Prediction complete — result={prediction}, probability={probability:.4f}, "
-        f"version={MODEL_VERSION}"
-    )
-
-    return response
+        logger.exception(f"Exception during prediction for entity_id={entity_id}")
+        prediction_errors_total.inc()
+        prediction_requests_total.labels(status="error").inc()
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "Prediction failed", "message": str(e)},
+        )
 
 
 @app.get("/metrics")

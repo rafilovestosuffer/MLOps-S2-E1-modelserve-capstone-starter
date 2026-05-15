@@ -111,25 +111,18 @@ def register(model, metrics):
             )
             run_id = run.info.run_id
 
-        logger.info(f"Logging metrics and params to MLflow run: {run_id}")
+        logger.info(f"MLflow run complete — run_id: {run_id}")
 
-        # Promote latest version to Production
+        # Set 'champion' alias on the newly registered version
         client = mlflow.MlflowClient()
-        versions = client.get_latest_versions(MODEL_NAME, stages=["None"])
+        versions = client.search_model_versions(f"name='{MODEL_NAME}'")
         if versions:
-            v = versions[0].version
-            logger.info(f"Registering model as '{MODEL_NAME}' in MLflow Registry")
-            logger.info(f"Model registered — version: {v}")
-
-            client.transition_model_version_stage(
-                name=MODEL_NAME,
-                version=v,
-                stage="Production",
-                archive_existing_versions=True,
-            )
-            logger.info(f"Alias 'Production' assigned to version {v}")
+            v = max(versions, key=lambda x: int(x.version)).version
+            logger.info(f"Registering model as '{MODEL_NAME}' version {v} in MLflow Registry")
+            client.set_registered_model_alias(MODEL_NAME, "champion", v)
+            logger.info(f"Alias 'champion' assigned to version {v}")
         else:
-            logger.warning("Could not find model version to promote to Production")
+            logger.warning("Could not find model version to assign champion alias")
 
     except Exception as e:
         logger.exception(f"Error during model registration: {e}")

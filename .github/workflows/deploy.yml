@@ -57,8 +57,7 @@ jobs:
     name: Pulumi Infrastructure
     runs-on: ubuntu-latest
     needs: test
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    continue-on-error: true
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && secrets.PULUMI_ACCESS_TOKEN != ''
 
     steps:
       - name: Checkout code
@@ -98,7 +97,7 @@ jobs:
   build-and-push:
     name: Build & Push to ECR
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, infrastructure]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
 
     outputs:
@@ -167,12 +166,16 @@ jobs:
             # Pull latest code
             git pull origin main
 
-            # Login to ECR and pull new image
+            # Login to ECR and pull the image built in CI
             AWS_REGION=ap-southeast-1
             ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+            ECR_REGISTRY="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
             aws ecr get-login-password --region $AWS_REGION \
-              | docker login --username AWS --password-stdin \
-                $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+              | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+            # Export ECR_IMAGE so docker compose uses the pre-built image from ECR
+            export ECR_IMAGE="$ECR_REGISTRY/modelserve-api:${{ github.sha }}"
+            echo "ECR_IMAGE=$ECR_IMAGE" >> .env
 
             docker compose pull api
 

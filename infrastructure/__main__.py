@@ -78,40 +78,44 @@ aws.ec2.RouteTableAssociation(
 # SECURITY GROUP
 # ══════════════════════════════════════════════════════════════════════════════
 
+# Poridhi VM / operator CIDR — restrict management UIs to this range.
+# Override via ALLOWED_MGMT_CIDR env var (e.g. "203.0.113.0/24" for a VPN).
+ALLOWED_MGMT_CIDR = os.environ.get("ALLOWED_MGMT_CIDR", "0.0.0.0/0")
+
 sg = aws.ec2.SecurityGroup(
     "modelserve-sg",
     vpc_id=vpc.id,
-    description="ModelServe security group - API, MLflow, Prometheus, Grafana, SSH",
+    description="ModelServe security group - API public, management ports restricted",
     ingress=[
-        # SSH
+        # SSH — restricted to operator CIDR
         aws.ec2.SecurityGroupIngressArgs(
             description="SSH",
             from_port=22, to_port=22,
-            protocol="tcp", cidr_blocks=["0.0.0.0/0"],
+            protocol="tcp", cidr_blocks=[ALLOWED_MGMT_CIDR],
         ),
-        # FastAPI inference service
+        # FastAPI inference — public
         aws.ec2.SecurityGroupIngressArgs(
             description="FastAPI",
             from_port=8000, to_port=8000,
             protocol="tcp", cidr_blocks=["0.0.0.0/0"],
         ),
-        # MLflow tracking server
+        # MLflow — restricted (no auth, exposes full model registry)
         aws.ec2.SecurityGroupIngressArgs(
             description="MLflow",
             from_port=5000, to_port=5000,
-            protocol="tcp", cidr_blocks=["0.0.0.0/0"],
+            protocol="tcp", cidr_blocks=[ALLOWED_MGMT_CIDR],
         ),
-        # Prometheus
+        # Prometheus — restricted (admin API enabled)
         aws.ec2.SecurityGroupIngressArgs(
             description="Prometheus",
             from_port=9090, to_port=9090,
-            protocol="tcp", cidr_blocks=["0.0.0.0/0"],
+            protocol="tcp", cidr_blocks=[ALLOWED_MGMT_CIDR],
         ),
-        # Grafana
+        # Grafana — restricted (default admin/admin password)
         aws.ec2.SecurityGroupIngressArgs(
             description="Grafana",
             from_port=3000, to_port=3000,
-            protocol="tcp", cidr_blocks=["0.0.0.0/0"],
+            protocol="tcp", cidr_blocks=[ALLOWED_MGMT_CIDR],
         ),
     ],
     egress=[
@@ -244,17 +248,17 @@ def make_user_data(s3_bucket_name: str) -> str:
 
         # ── Write .env for production ──────────────────────────────────────
         cat > /home/ubuntu/modelserve/.env << 'ENVEOF'
-        POSTGRES_USER=mlflow
-        POSTGRES_PASSWORD=mlflow
-        POSTGRES_DB=mlflow
-        MLFLOW_ARTIFACT_ROOT=s3://{s3_bucket_name}/mlflow-artifacts
-        REDIS_URL=redis://redis:6379
-        MLFLOW_TRACKING_URI=http://mlflow:5000
-        MLFLOW_MODEL_NAME=fraud_detector
-        FEAST_REPO_PATH=/app/feast_repo
-        GF_SECURITY_ADMIN_USER=admin
-        GF_SECURITY_ADMIN_PASSWORD=admin
-        ENVEOF
+POSTGRES_USER=mlflow
+POSTGRES_PASSWORD=mlflow
+POSTGRES_DB=mlflow
+MLFLOW_ARTIFACT_ROOT=s3://{s3_bucket_name}/mlflow-artifacts
+REDIS_URL=redis://redis:6379
+MLFLOW_TRACKING_URI=http://mlflow:5000
+MLFLOW_MODEL_NAME=fraud_detector
+FEAST_REPO_PATH=/app/feast_repo
+GF_SECURITY_ADMIN_USER=admin
+GF_SECURITY_ADMIN_PASSWORD=admin
+ENVEOF
 
         # ── Start supporting services (not API yet — no model registered) ──
         cd /home/ubuntu/modelserve

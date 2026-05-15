@@ -22,9 +22,9 @@ services:
     networks:
       - modelserve-net
     environment:
-      POSTGRES_USER: mlflow
-      POSTGRES_PASSWORD: mlflow
-      POSTGRES_DB: mlflow
+      POSTGRES_USER: ${POSTGRES_USER:-mlflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mlflow}
+      POSTGRES_DB: ${POSTGRES_DB:-mlflow}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -79,6 +79,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: ${ECR_IMAGE:-modelserve-api:local}
     container_name: modelserve-api
     restart: unless-stopped
     networks:

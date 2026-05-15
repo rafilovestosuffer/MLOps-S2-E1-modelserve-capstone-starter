@@ -21,10 +21,12 @@ def load_features():
     df = pd.read_parquet("training/features.parquet")
     X = df[FEATURE_COLS].fillna(0)
 
-    # Synthetic fraud labels: ~1% fraud rate based on high transaction amount
-    # (mirrors real credit card fraud datasets)
-    threshold = df["amt"].quantile(0.99)
-    y = ((df["amt"] > threshold) & (df["unix_time"] % 7 == 0)).astype(int)
+    if "is_fraud" not in df.columns:
+        raise ValueError(
+            "features.parquet is missing the 'is_fraud' column. "
+            "Re-export the parquet from fraudTrain.csv including the label column."
+        )
+    y = df["is_fraud"].astype(int)
     print(f"Features shape: {X.shape}, fraud rate: {y.mean():.3%}")
     return X, y
 
@@ -66,17 +68,15 @@ def train_and_register(X, y):
 
     print(f"Run ID: {run_id}")
 
-    # Promote latest version to Production
+    # Set 'champion' alias on the newly registered version
     client = mlflow.MlflowClient()
-    versions = client.get_latest_versions(MODEL_NAME, stages=["None"])
+    versions = client.search_model_versions(f"name='{MODEL_NAME}'")
     if versions:
-        v = versions[0].version
-        client.transition_model_version_stage(
-            name=MODEL_NAME, version=v, stage="Production", archive_existing_versions=True
-        )
-        print(f"Model '{MODEL_NAME}' version {v} promoted to Production")
+        v = max(versions, key=lambda x: int(x.version)).version
+        client.set_registered_model_alias(MODEL_NAME, "champion", v)
+        print(f"Model '{MODEL_NAME}' version {v} — alias 'champion' set")
     else:
-        print("Warning: could not find version to promote")
+        print("Warning: could not find version to assign champion alias")
 
 if __name__ == "__main__":
     X, y = load_features()
