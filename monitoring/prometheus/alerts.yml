@@ -35,11 +35,12 @@ groups:
 
       # Alert 3: High Error Rate
       # More than 5% of requests are errors over a 5-minute window, sustained for 2 minutes.
+      # Uses prediction_requests_total{status="error"} as numerator so ratio stays in [0,1].
       # clamp_min avoids division-by-zero when no traffic exists.
       - alert: HighErrorRate
         expr: |
           (
-            rate(prediction_errors_total[5m])
+            rate(prediction_requests_total{status="error"}[5m])
             /
             clamp_min(rate(prediction_requests_total[5m]), 0.0001)
           ) > 0.05
