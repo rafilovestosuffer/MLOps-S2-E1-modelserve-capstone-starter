@@ -1,6 +1,6 @@
 fastapi==0.111.0
 uvicorn[standard]==0.29.0
-mlflow==2.13.0
+mlflow==2.14.0
 scikit-learn==1.4.2
 feast[redis]==0.38.0
 prometheus-client==0.20.0
