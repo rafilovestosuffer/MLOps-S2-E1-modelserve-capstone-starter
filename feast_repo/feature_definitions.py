@@ -1,3 +1,4 @@
+import os
 from datetime import timedelta
 from feast import Entity, FeatureView, Field, FileSource
 from feast.types import Float64, Int64
@@ -7,8 +8,11 @@ cc_num = Entity(
     description="Credit card number — primary entity key",
 )
 
+_repo_dir = os.path.dirname(__file__)
+_parquet_path = os.path.abspath(os.path.join(_repo_dir, "..", "training", "features.parquet"))
+
 fraud_source = FileSource(
-    path="/app/training/features.parquet",
+    path=_parquet_path,
     timestamp_field="event_timestamp",
 )
 
