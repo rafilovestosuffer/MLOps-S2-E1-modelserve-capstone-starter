@@ -3,6 +3,7 @@ Train a fraud detection model from features.parquet and register it in MLflow.
 Used when fraudTrain.csv is not available locally.
 """
 import os
+import sys
 import numpy as np
 import pandas as pd
 import mlflow
@@ -11,13 +12,20 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from app.logger import configure_logging, get_logger
+
+configure_logging()
+logger = get_logger(__name__)
+
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
 MODEL_NAME = "fraud_detector"
 FEATURE_COLS = ["amt", "lat", "long", "city_pop", "unix_time", "merch_lat", "merch_long"]
 RANDOM_STATE = 42
 
+
 def load_features():
-    print("Loading features.parquet...")
+    logger.info("Loading features.parquet...")
     df = pd.read_parquet("training/features.parquet")
     X = df[FEATURE_COLS].fillna(0)
 
@@ -27,8 +35,9 @@ def load_features():
             "Re-export the parquet from fraudTrain.csv including the label column."
         )
     y = df["is_fraud"].astype(int)
-    print(f"Features shape: {X.shape}, fraud rate: {y.mean():.3%}")
+    logger.info(f"Features shape: {X.shape}, fraud rate: {y.mean():.3%}")
     return X, y
+
 
 def train_and_register(X, y):
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
@@ -42,7 +51,7 @@ def train_and_register(X, y):
         class_weight="balanced", random_state=RANDOM_STATE, n_jobs=-1,
     )
 
-    print("Training model...")
+    logger.info("Training model...")
     model.fit(X_train, y_train)
 
     y_pred = model.predict(X_test)
@@ -53,7 +62,7 @@ def train_and_register(X, y):
         "f1":        float(f1_score(y_test, y_pred, zero_division=0)),
         "roc_auc":   float(roc_auc_score(y_test, y_proba)),
     }
-    print(f"Metrics: {metrics}")
+    logger.info(f"Training complete — metrics: {metrics}")
 
     mlflow.set_experiment(MODEL_NAME)
     with mlflow.start_run() as run:
@@ -65,8 +74,7 @@ def train_and_register(X, y):
             registered_model_name=MODEL_NAME,
         )
         run_id = run.info.run_id
-
-    print(f"Run ID: {run_id}")
+        logger.info(f"MLflow run complete — run_id: {run_id}")
 
     # Set 'champion' alias on the newly registered version
     client = mlflow.MlflowClient()
@@ -74,11 +82,16 @@ def train_and_register(X, y):
     if versions:
         v = max(versions, key=lambda x: int(x.version)).version
         client.set_registered_model_alias(MODEL_NAME, "champion", v)
-        print(f"Model '{MODEL_NAME}' version {v} — alias 'champion' set")
+        logger.info(f"Model '{MODEL_NAME}' version {v} — alias 'champion' set")
     else:
-        print("Warning: could not find version to assign champion alias")
+        logger.warning("Could not find version to assign champion alias")
+
 
 if __name__ == "__main__":
-    X, y = load_features()
-    train_and_register(X, y)
-    print("\nDone! Model registered in MLflow as Production.")
+    try:
+        X, y = load_features()
+        train_and_register(X, y)
+        logger.info("Training pipeline complete — model registered in MLflow with alias 'champion'")
+    except Exception:
+        logger.exception("Training pipeline failed")
+        sys.exit(1)
