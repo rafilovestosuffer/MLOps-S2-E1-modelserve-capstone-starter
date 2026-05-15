@@ -6,7 +6,7 @@
 # ============================================================================
 
 # ── Stage 1: Builder ─────────────────────────────────────────────────────────
-FROM python:3.10-slim@sha256:db7a1753878f2e564b6a0257052d3fa9aeb28ceb35ea82ff6303939b5c1e6de2 AS builder
+FROM python:3.10-slim AS builder
 
 WORKDIR /build
 
@@ -15,7 +15,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
-FROM python:3.10-slim@sha256:db7a1753878f2e564b6a0257052d3fa9aeb28ceb35ea82ff6303939b5c1e6de2 AS runtime
+FROM python:3.10-slim AS runtime
 
 WORKDIR /app
 
