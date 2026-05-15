@@ -32,7 +32,7 @@ configure_logging()
 logger = get_logger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-DATA_PATH           = "training/data/fraudTrain.csv"
+DATA_PATH           = os.path.join(os.path.dirname(__file__), "data", "fraudTrain.csv")
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
 MODEL_NAME          = "fraud_detector"   # MUST match model_loader.py
 RANDOM_STATE        = 42
