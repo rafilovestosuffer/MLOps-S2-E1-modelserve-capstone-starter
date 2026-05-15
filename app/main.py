@@ -1,15 +1,17 @@
 import time
 import os
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import numpy as np
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
-from app.logger import configure_logging, get_logger
+from app.logger import configure_logging, get_logger, set_request_id, clear_request_id
 from app.model_loader import load_production_model
 from app.feature_client import get_feature_store, get_online_features, MODEL_FEATURE_NAMES
 from app.metrics import (
@@ -64,6 +66,21 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="ModelServe — Fraud Detection API", lifespan=lifespan)
+
+
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        request_id = str(uuid.uuid4())
+        set_request_id(request_id)
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = request_id
+            return response
+        finally:
+            clear_request_id()
+
+
+app.add_middleware(RequestIdMiddleware)
 
 
 class PredictRequest(BaseModel):
