@@ -102,6 +102,8 @@ def register(model, metrics):
 
     try:
         with mlflow.start_run() as run:
+            run_id = run.info.run_id
+            logger.info(f"MLflow run started — run_id: {run_id}")
             mlflow.log_params(PARAMS)
             mlflow.log_metrics(metrics)
             mlflow.sklearn.log_model(
@@ -109,9 +111,7 @@ def register(model, metrics):
                 artifact_path="model",
                 registered_model_name=MODEL_NAME,
             )
-            run_id = run.info.run_id
-
-        logger.info(f"MLflow run complete — run_id: {run_id}")
+            logger.info(f"MLflow run complete — params, metrics, and model logged")
 
         # Set 'champion' alias on the newly registered version
         client = mlflow.MlflowClient()
